@@ -19,6 +19,7 @@ Version 0.2 describes what the finished compiler really accepts. Changes from th
    - A name may not be a keyword. This compiler reserves the 34 keywords of the CORE and STANDARD tiers in `keywords.json`. The 36 EXTENDED keywords are not used by the language, so they can still be used as ordinary names (for example `a` or `te`).
 3. **Literals**
    - Whole numbers: `[0-9]+`, from 0 to 9223372036854775807. A minus sign in front is an operator, not part of the number.
+   - Decimal numbers: `[0-9]+.[0-9]+`, for example `3.14`. There is no exponent form.
    - Strings: `"..."` with the escapes `\n`, `\t`, `\r`, `\"`, `\\`. Strings may contain any UTF-8 text, including Kenyang letters.
    - Booleans: the keywords `tɛtɛp` (true) and `nse` (false).
 4. **Comments and spaces**
@@ -61,7 +62,7 @@ program     ::= func_decl*
 func_decl   ::= KW_FUNC IDENT "(" param_list? ")" (":" type)? block
 param_list  ::= param ("," param)*
 param       ::= type IDENT
-type        ::= KW_INT | KW_BOOL | KW_STRING | KW_VOID
+type        ::= KW_INT | KW_FLOAT | KW_BOOL | KW_STRING | KW_VOID
 
 block       ::= "{" stmt* "}"
 
@@ -95,7 +96,7 @@ relation    ::= additive (("<" | "<=" | ">" | ">=") additive)*
 additive    ::= term (("+" | "-") term)*
 term        ::= unary (("*" | "/" | "%") unary)*
 unary       ::= ("-" | KW_NOT) unary | primary
-primary     ::= INT_LIT | STRING_LIT | KW_TRUE | KW_FALSE | IDENT | call | "(" expr ")"
+primary     ::= INT_LIT | FLOAT_LIT | STRING_LIT | KW_TRUE | KW_FALSE | IDENT | call | "(" expr ")"
 call        ::= IDENT "(" (expr ("," expr)*)? ")"
 ```
 
@@ -110,11 +111,12 @@ The grammar has no left recursion. Every choice can be made by looking at the ne
 | Type | Keyword | Values |
 |---|---|---|
 | Whole number | `pɨ` (`pih`) | 64-bit signed |
+| Decimal number | `pɨ_kati` (`pih_kati`) | 64-bit floating point |
 | Truth value | `tɛp` (`tehp`) | `tɛtɛp`, `nse` |
 | Text | `bɛyɔŋ` (`behyohng`) | string literals; can be stored, passed, returned and written |
 | Nothing | `ngwɔ` (`ngwoh`) | return type of a function that gives no value |
 
-There is no automatic change of type. `ŋati` (`ngati`) declares a variable whose type is taken from its first value: `ŋati k = 5;` makes `k` an int.
+The only automatic change of type is from a whole number to a decimal: a whole number may be used wherever a decimal is expected (in a calculation with a decimal, a declaration, an assignment, an argument or a return). A decimal can never become a whole number. `%` needs two whole numbers. `ŋati` (`ngati`) declares a variable whose type is taken from its first value: `ŋati k = 5;` makes `k` an int.
 
 ### Variables and scope
 
@@ -133,7 +135,7 @@ There is no automatic change of type. `ŋati` (`ngati`) declares a variable whos
 
 | Statement | Meaning |
 |---|---|
-| `sɔ(e);` | Print the value of `e` and a line break. A bool prints as `tɛtɛp` or `nse`. |
+| `sɔ(e);` | Print the value of `e` and a line break. A bool prints as `tɛtɛp` or `nse`. A decimal prints with six digits after the point. |
 | `pay(x);` | Read a whole number from the input into the int variable `x`. Leading spaces, line breaks and non-ASCII bytes (for example a byte-order mark that some terminals add) are skipped; reading stops at the first character that is not a digit. If there is no number, `x` becomes 0. |
 | `yat ... rɔ_yat ... rɔ ...` | Choose the first branch whose condition is true. |
 | `kʉ_te (c) { }` | Repeat while `c` is true. |
@@ -144,7 +146,7 @@ There is no automatic change of type. `ŋati` (`ngati`) declares a variable whos
 
 `ne` and `kɛ` stop early: in `a ne b`, `b` is not evaluated when `a` is false; in `a kɛ b`, `b` is not evaluated when `a` is true.
 
-Division and remainder cut toward zero (`-17 / 5` is `-3`, `-17 % 5` is `-2`). Whole numbers wrap around at 64 bits. Dividing by zero stops the program with `runtime error: division by zero` and exit code 1.
+Division and remainder cut toward zero (`-17 / 5` is `-3`, `-17 % 5` is `-2`). Whole numbers wrap around at 64 bits. Dividing by zero, whole or decimal, stops the program with `runtime error: division by zero` and exit code 1.
 
 ---
 
@@ -152,9 +154,9 @@ Division and remainder cut toward zero (`-17 / 5` is `-3`, `-17 % 5` is `-2`). W
 
 These words are recognised and cannot be used as names, but the compiler gives them no meaning yet:
 
-`pɨ_kati` (float), `ɛyɔŋ` (char), `ngwɔ_nɛ` (null), `fɔ` (then), `yat_bɛ` (switch), `mpok` (case), `rɔ_mpok` (default), `burɛ` (const), `bhɔŋ_kʉ` (main), `rɛsɛ` (println), `pay_bɛ` (len), `piti_pɨ` (to_int), `piti_bɛyɔŋ` (to_str).
+`ɛyɔŋ` (char), `ngwɔ_nɛ` (null), `fɔ` (then), `yat_bɛ` (switch), `mpok` (case), `rɔ_mpok` (default), `burɛ` (const), `bhɔŋ_kʉ` (main), `rɛsɛ` (println), `pay_bɛ` (len), `piti_pɨ` (to_int), `piti_bɛyɔŋ` (to_str).
 
-Using the float or char type gives the message "the type is not supported in this version". Writing a number with a decimal point gives a similar message.
+Using the char type gives the message "the type is not supported in this version".
 
 ---
 
@@ -192,6 +194,17 @@ Every error names the file, line and column, shows the source line with a marker
 
 ---
 
+### Warnings
+
+A warning does not stop the build. It is shown when the program is legal but probably careless.
+
+| Warning | Meaning |
+|---|---|
+| `variable 'x' is never used` | A variable is declared and never read. Names that start with `_` and function parameters are not reported. |
+| `this code can never run` | A statement follows `piti`, `kati`, `chak`, or an `if` whose branches all return. |
+
+---
+
 ## 8. Interfaces Between Stages
 
 | From | To | Form |
@@ -212,4 +225,6 @@ Every error names the file, line and column, shows the source line with a marker
 - Added the full priority table and the rules for types, scope and evaluation.
 - `sɔ` always ends the printed value with a line break.
 - The compiler uses the CORE and STANDARD keyword tiers; EXTENDED words stay free for use as names.
-- Float and char are recognised but not compiled.
+- Added decimal numbers (`pɨ_kati`) with automatic widening from whole numbers.
+- Added warnings for unused variables and unreachable code.
+- Char is recognised but not compiled.

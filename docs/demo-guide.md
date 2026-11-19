@@ -13,7 +13,7 @@ pip install -r requirements.txt
 python -m pytest -q
 ```
 
-Expected: `144 passed`. If this passes, everything below will work.
+Expected: `167 passed`. If this passes, everything below will work.
 
 Folder for generated files (the compiler writes the program and its assembly next to the name given with `-o`):
 
@@ -126,6 +126,24 @@ Expected: `14 instructions before, 10 after, 4 removed`.
 
 ---
 
+## 3b. Decimal Numbers (1 minute)
+
+```powershell
+python -m src.compiler examples/decimals.ken -o build/decimals --run
+```
+
+Expected: `3.250000`, `-1.500000`, `tɛtɛp`, `8.500000`, `12.566360`, `1.000000`, `0.333333`, `-7.500000`, `7.000000`.
+
+Say: whole numbers and decimals can be mixed, and the whole number is converted first. Show the conversion step:
+
+```powershell
+python -m src.compiler examples/decimals.ken --emit ir
+```
+
+Look for `itof` and the operators with a dot, such as `*.`.
+
+---
+
 ## 4. The Compiler Finds Mistakes (2 minutes)
 
 **Spelling and symbol mistakes (lexer):**
@@ -148,6 +166,18 @@ Expected: six errors, including `'cuont' is not declared` with `hint: Did you me
 
 Say: nothing is built when there is an error, and every error of a step is shown at once.
 
+**Warnings (code that is legal but careless):**
+```powershell
+python -m src.compiler examples/errors/warnings.ken --interpret
+```
+Expected: two warnings (`this code can never run` and `variable 'spare' is never used`), then the program still runs and prints `2`.
+
+**Assembly clean-up:**
+```powershell
+python -m src.compiler examples/loops.ken --emit ir-opt --stats
+```
+Expected on the error stream: `assembly clean-up: 120 instructions before, 107 after, 13 removed`.
+
 ---
 
 ## 5. The Two Ways to Run Agree (1 minute)
@@ -167,8 +197,8 @@ Say: the virtual machine, the optimised program and the unoptimised program alwa
 ## 6. Closing (30 seconds)
 
 - Seven steps, each with one job: Read, Shape, Check, Flatten, Trim, Write, Join.
-- 144 automated tests.
-- Limits: no decimal numbers, arrays, or text joining yet (section 10 of `docs/project-explainer.md`).
+- 167 automated tests.
+- Limits: no arrays, character type, or text joining yet (section 10 of `docs/project-explainer.md`).
 
 ---
 

@@ -79,7 +79,7 @@ kuh main() : ngwoh {
 | **Area 3** | Symbol table, semantic analyser, optimiser | Done |
 | **Area 4** | Intermediate code, x86-64 code generator, runtime, virtual machine, command line | Done |
 
-144 automated tests pass. Optimised and unoptimised builds, and the native program and the virtual machine, give identical output on all 13 example programs.
+167 automated tests pass. Optimised and unoptimised builds, and the native program and the virtual machine, give identical output on all 14 example programs. The compiler also supports decimal numbers, prints warnings for unused variables and unreachable code, and cleans up the generated assembly.
 
 ---
 
@@ -145,8 +145,8 @@ python -m src.lexer examples/factorial_utf8.ken --json
 | [`src/compiler.py`](src/compiler.py) | Command line that joins all stages |
 | [`grammar/kenyang.lark`](grammar/kenyang.lark) | Lexical grammar for UTF-8 Lower Kenyang and the ASCII fallback |
 | [`keywords.json`](keywords.json) | The 70 Lower Kenyang keywords (`CORE`, `STANDARD`, `EXTENDED`) |
-| [`tests/`](tests/) | 144 `pytest` tests for every stage and end to end |
-| [`examples/`](examples/) | 13 sample programs, and `errors/` with three programs that contain mistakes |
+| [`tests/`](tests/) | 167 `pytest` tests for every stage and end to end |
+| [`examples/`](examples/) | 14 sample programs, and `errors/` with programs that contain mistakes or warnings |
 | [`docs/project-explainer.md`](docs/project-explainer.md) | Plain-language explanation of the whole project |
 | [`docs/demo-guide.md`](docs/demo-guide.md) | Step-by-step script for the demonstration |
 | [`docs/language-spec.md`](docs/language-spec.md) | Language specification (v0.2) |

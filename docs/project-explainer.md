@@ -14,7 +14,8 @@ This document explains the whole project in simple words. It says what we built,
 - Only the **keywords** are Kenyang. The rest of the compiler is built the same way as any other compiler. This is why the project is possible.
 - The compiler works in **seven steps**: Read, Shape, Check, Flatten, Trim, Write, Join.
 - The output is a **real machine-code program** (an ELF executable). It does not need Python or any other helper to run.
-- We tested it with **144 automated tests** and 13 example programs. The native program and a second, independent way of running the same program always give the same answer.
+- It handles **whole numbers, decimal numbers, true/false and text**, and it gives **warnings** about careless code.
+- We tested it with **167 automated tests** and 14 example programs. The native program and a second, independent way of running the same program always give the same answer.
 
 **Remember:** Kenyang words in, running program out, seven steps in between.
 
@@ -102,7 +103,7 @@ Here are some of the words we use:
 | read | `pay` | `pay` |
 | and / or / not | `ne` / `kɛ` / `ka` | `ne` / `keh` / `ka` |
 
-The full list has 70 words. They come from published Lower Kenyang sources, listed in `docs/kenyang-research-dossier.md`. The compiler uses 21 of them in this version. 13 more are kept aside (reserved) for later use. The others are free to use as names.
+The full list has 70 words. They come from published Lower Kenyang sources, listed in `docs/kenyang-research-dossier.md`. The compiler uses 22 of them in this version. 12 more are kept aside (reserved) for later use. The others are free to use as names.
 
 Two small choices help the people who write programs:
 
@@ -117,9 +118,9 @@ Two small choices help the people who write programs:
 
 | Feature | What you can write |
 |---|---|
-| Data | whole numbers, true/false, text |
-| Variables | `pɨ x = 5;` or let the compiler find the type with `ŋati x = 5;` |
-| Calculation | `+ - * / %` with the usual order (`*` before `+`) |
+| Data | whole numbers, decimal numbers, true/false, text |
+| Variables | `pɨ x = 5;`, `pɨ_kati y = 2.5;`, or let the compiler find the type with `ŋati x = 5;` |
+| Calculation | `+ - * / %` with the usual order (`*` before `+`). Whole numbers and decimals can be mixed: the whole number is turned into a decimal first |
 | Comparison | `== != < <= > >=` |
 | Logic | `ne` (and), `kɛ` (or), `ka` (not). The right side is skipped when the left side already decides the answer |
 | Choice | `yat` ... `rɔ_yat` ... `rɔ` (if, else if, else) |
@@ -127,7 +128,13 @@ Two small choices help the people who write programs:
 | Functions | with inputs and one output, calling each other, calling themselves |
 | Input and output | `sɔ(x);` prints, `pay(x);` reads a number |
 
-**What it cannot do yet:** decimal numbers, arrays, joining or comparing text. See section 10.
+**What it cannot do yet:** arrays, joining or comparing text. See section 10.
+
+### Three extras that go beyond the basics
+
+1. **Decimal numbers.** `pɨ_kati` is a decimal number (a 64-bit floating-point number, the same kind the processor uses). A whole number can be used wherever a decimal is expected: `pɨ_kati x = 3;` is fine, and `2 * 1.5` is `3.0`. The other way round is an error, because it would lose the part after the point. Decimals are printed with six digits after the point.
+2. **Warnings.** Some code is legal but probably a mistake. The compiler still builds the program and prints a warning: a variable that is never used, and code after a `piti`, `kati` or `chak` that can never run. A name starting with `_` is never reported as unused.
+3. **Assembly clean-up.** After the code generator finishes, a small pass removes loads that are not needed. The code generator keeps every answer in a stack box, and the next instruction often loads the same box straight back. The value is still in the register, so the load can go. On `loops.ken` this removes 13 of 120 instructions.
 
 ---
 
@@ -301,6 +308,8 @@ Run the file and it prints `14`.
   - Every variable gets a **unique name** (`x`, then `x.1` if an inner block reuses `x`), so later steps never confuse two variables.
   - When a name is wrong, the compiler suggests the closest known name: `'cuont' is not declared. Did you mean 'count'?`
   - After one error in an expression, the expression gets the type `error`, so one mistake does not cause ten more messages.
+  - Decimal rules: a whole number may widen to a decimal; a decimal may never narrow to a whole number; `%` needs two whole numbers.
+  - It also collects **warnings** (never-used variables and unreachable code). Warnings do not stop the build.
 - **A mistake it catches:** `sɔ(add(1));` when `add` needs two inputs.
 
 ### Step 4. Flatten: Intermediate Code (`src/ir.py`)
@@ -312,6 +321,7 @@ Run the file and it prints `14`.
   - `if` and loops become **labels and jumps**. For example, `while (c) { body }` becomes: label `start`, "if `c` is false go to `end`", the body, "go to `start`", label `end`.
   - `ne` and `kɛ` become jumps too. This is how the right side is skipped when the left side already decides the answer.
   - Text constants are kept in one table, so the same text is stored once.
+  - When a whole number meets a decimal, an `itof` step ("integer to float") is added. Decimal calculations use operators with a dot (`+.`, `*.`, `<.`) so nobody confuses them with whole-number calculations.
 - **Why not go straight from the tree to machine code?** It would put two hard jobs in one place and make testing very hard. With this bridge, a person can read the simple steps and check them by hand.
 
 ### Step 5. Trim: the Optimiser (`src/optimiser.py`)
@@ -338,8 +348,10 @@ Run the file and it prints `14`.
   - For each step, the generator loads the values into registers (`rax`, `rcx`), does the work, and stores the answer back in a box.
   - Functions follow the standard **System V calling rule**: the first six inputs go in registers `rdi, rsi, rdx, rcx, r8, r9`, extra inputs go on the stack, and the answer comes back in `rax`.
   - Decisions and loops become compare-and-jump instructions.
-  - Division checks for zero first and stops with `runtime error: division by zero`.
-- **The runtime:** a small set of routines written in assembly. They print a number, print text, print `tɛtɛp` or `nse`, read a number, and exit. They talk **directly to the Linux kernel** (system calls), so we need no C library.
+  - Division checks for zero first and stops with `runtime error: division by zero`. This is true for decimals as well.
+  - **Decimal numbers** use the processor's SSE instructions (`addsd`, `mulsd`, `ucomisd` and others). A decimal is kept in its box as 8 raw bytes, like any other value, and is moved into a special register only to calculate.
+  - A final **clean-up pass** (peephole pass) removes loads of a box that was just stored.
+- **The runtime:** a small set of routines written in assembly. They print a whole number, print a decimal, print text, print `tɛtɛp` or `nse`, read a number, and exit. They talk **directly to the Linux kernel** (system calls), so we need no C library.
 - **Our choices:**
   - **One box per variable** is not the fastest design, but it is easy to get right and easy to explain. Correctness first.
   - **x86-64** because it is what most computers use, and it is well documented.
@@ -376,6 +388,10 @@ This is not one of the seven steps. It is a small program that runs the simple s
 | Runtime | In assembly, direct system calls | No C library needed. Shows exactly how a program talks to the system. |
 | Variables in code generation | One box on the stack each | Simple and correct. Faster designs (register allocation) are possible later. |
 | Reserved words | 34 words reserved, 36 free | The extended words (like `a` and `te`) would otherwise take away common variable names. |
+| Decimal numbers | 64-bit floating point, kept as raw bytes in the same boxes | One kind of box for every value keeps the code generator simple. The processor does the calculation. |
+| Printing decimals | Six digits after the point, rounded the same way in the compiler and the virtual machine | The native program and the virtual machine must give the same text. |
+| Warnings | Reported, but never stop the build | The program is legal, so it should still run. The programmer is told about the risk. |
+| Assembly clean-up | One simple rule: drop a load right after a store of the same box | Safe to prove correct, and it shows a measurable gain. |
 | Backup way to run | Virtual machine | Works without WSL. Doubles as a test partner. |
 | Errors | Report many, keep going | Programmers fix all mistakes in one pass. |
 
@@ -383,15 +399,15 @@ This is not one of the seven steps. It is a small program that runs the simple s
 
 ## 9. How We Know It Works
 
-**144 automated tests** run with one command: `python -m pytest`.
+**167 automated tests** run with one command: `python -m pytest`.
 
 | Group | What it checks |
 |---|---|
 | Lexer (9) | All 70 keywords in both spellings, tone marks, errors and recovery |
 | Parser (19) | Operator order, every statement, error recovery, tree shape |
-| Semantic analyser (21) | Every type and scope rule, every error message |
-| Intermediate code and optimiser (33) | The shape of the simple steps, every optimisation, same answer with and without optimising |
-| End to end (62) | All 13 examples, run **four ways each**: optimised or not, native program or virtual machine. All four must print the same, correct answer |
+| Semantic analyser (30) | Every type and scope rule, every error message, decimal rules, warnings |
+| Intermediate code and optimiser (39) | The shape of the simple steps, every optimisation, decimal folding, same answer with and without optimising |
+| End to end (70) | All 14 examples, run **four ways each**: optimised or not, native program or virtual machine. All four must print the same, correct answer. Also decimal printing, warnings and the assembly clean-up |
 
 Other checks:
 
@@ -408,7 +424,8 @@ If a computer has no WSL or `as`, the native tests are skipped and the virtual m
 
 We say this clearly, because a compiler with honest limits is better than one with hidden ones.
 
-- **Decimal numbers** (`pɨ_kati`) and **single characters** (`ɛyɔŋ`): the words are reserved, but the compiler answers "not supported in this version".
+- **Single characters** (`ɛyɔŋ`): the word is reserved, but the compiler answers "not supported in this version".
+- **Decimal numbers:** no exponent form such as `1e5`. Printing shows six digits after the point and works up to about 9.2 followed by 18 zeros. Decimals cannot be read from the keyboard yet.
 - **Arrays**, **structures** and **switch**: not built.
 - **Text:** it can be stored, passed, returned and printed. It cannot be joined with `+` or compared with `==`.
 - **Variables outside functions:** all variables are inside functions.
@@ -425,7 +442,7 @@ Each of these is a clear next step for a future version.
 |---|---|---|
 | 1 | Language design, 70-word Kenyang lexicon, lexer | `docs/language-spec.md`, `keywords.json`, `grammar/kenyang.lark`, `src/lexer.py`, `docs/kenyang-research-dossier.md` |
 | 2 | Parser and syntax tree | `src/parser.py`, `src/ast_nodes.py`, `src/diagnostics.py` |
-| 3 | Semantic analyser and optimiser | `src/semantic.py`, `src/optimiser.py` |
+| 3 | Semantic analyser (with warnings) and optimiser | `src/semantic.py`, `src/optimiser.py` |
 | 4 | Intermediate code, code generator, runtime, build tools, virtual machine, command line | `src/ir.py`, `src/codegen.py`, `src/toolchain.py`, `src/interpreter.py`, `src/compiler.py` |
 
 Everyone should be able to explain all seven steps, not only their own area.
@@ -473,8 +490,17 @@ Windows has no assembler or linker in the form we use. WSL gives us Linux tools,
 **What if the program has a mistake?**
 The compiler reports every mistake of the current step with line, column and a hint, and builds nothing.
 
+**How do you handle decimal numbers?**
+A decimal is a 64-bit floating-point number. A whole number is converted to a decimal when the two meet. The code generator uses the processor's own decimal instructions. The runtime has its own routine to print the number with six digits after the point.
+
+**What is a warning, and how is it different from an error?**
+An error means the program is wrong and nothing is built. A warning means the program is legal but probably careless, such as a variable that is never used. It is built, and the programmer is told.
+
+**What is the assembly clean-up?**
+A pass over the finished assembly. If an instruction stores a value in a box and the next instruction loads that same box, the load is removed, because the value is still in the register.
+
 **What would you add next?**
-Decimal numbers, arrays, joining text, and putting more values in registers instead of memory boxes.
+Arrays, joining text, reading decimals, and putting more values in registers instead of memory boxes.
 
 ---
 
@@ -510,6 +536,10 @@ Decimal numbers, arrays, joining text, and putting more values in registers inst
 | Runtime | Helper routines every program needs, such as printing |
 | System call | A request from a program to the operating system |
 | Virtual machine | A program that runs the simple steps directly |
+| Floating-point number | The computer's way of storing a decimal number in 64 bits |
+| Widening | Turning a whole number into a decimal so the two can be used together |
+| Warning | A message about code that is legal but probably a mistake. The build continues |
+| Peephole pass | A small clean-up that looks at a few neighbouring instructions and removes waste |
 | WSL | Windows Subsystem for Linux: Linux tools inside Windows |
 | Tone mark | An accent that shows how a syllable is pitched in a tonal language |
 | ASCII | The basic English-keyboard character set |
