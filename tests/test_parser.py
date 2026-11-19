@@ -128,9 +128,9 @@ def test_expression_alone_is_not_a_statement() -> None:
     assert len(errors) == 1 and "does nothing" in errors[0].message
 
 
-def test_decimal_numbers_give_a_clear_message() -> None:
-    _, errors = parse_text("kʉ main() : ngwɔ { pɨ x = 1.5; }")
-    assert len(errors) == 1 and "not supported" in errors[0].message
+def test_decimal_literal_becomes_a_float_node() -> None:
+    tree = body_of_main("pɨ_kati x = 1.5;")[0].init
+    assert isinstance(tree, ast.FloatLit) and tree.value == 1.5
 
 
 def test_all_examples_parse_without_errors() -> None:

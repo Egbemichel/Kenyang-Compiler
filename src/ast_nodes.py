@@ -30,6 +30,11 @@ class IntLit(Expr):
 
 
 @dataclass
+class FloatLit(Expr):
+    value: float
+
+
+@dataclass
 class BoolLit(Expr):
     value: bool
 
@@ -85,6 +90,7 @@ class Assign(Stmt):
     name: str
     value: Expr
     unique: str = ""
+    ty: Optional[str] = None  # type of the variable, set by the semantic analyser
 
 
 @dataclass

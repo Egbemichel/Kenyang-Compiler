@@ -378,11 +378,8 @@ class Parser:
             self.advance()
             return ast.BoolLit(False, line=t.line, column=t.column)
         if t.type == "FLOAT_LIT":
-            raise ParseError(
-                "decimal numbers are not supported in this version",
-                t,
-                "Use whole numbers only.",
-            )
+            self.advance()
+            return ast.FloatLit(float(t.lexeme), line=t.line, column=t.column)
         if t.type == "IDENT":
             self.advance()
             if self.at("LPAREN"):

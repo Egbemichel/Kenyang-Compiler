@@ -9,11 +9,11 @@ with the native program.
 from __future__ import annotations
 
 from src.ir import (
-    BinOp, CallInstr, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
+    BinOp, CallInstr, FloatConst, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
     JumpIfTrue, Label, Move, Operand, ReadInstr, ReturnInstr, StrConst, UnOp,
     Var, WriteInstr,
 )
-from src.optimiser import fold_binary, wrap
+from src.optimiser import fold_binary, fold_float, wrap
 
 TRUE_WORD = "tɛtɛp"
 FALSE_WORD = "nse"
@@ -78,6 +78,8 @@ class Machine:
         def val(op: Operand) -> object:
             if isinstance(op, IntConst):
                 return op.value
+            if isinstance(op, FloatConst):
+                return op.value
             if isinstance(op, StrConst):
                 return self.program.strings[op.index]
             return env.get(op.name, 0)
@@ -92,12 +94,23 @@ class Machine:
                 env[ins.dst.name] = val(ins.src)
             elif isinstance(ins, BinOp):
                 a, b = val(ins.left), val(ins.right)
-                if ins.op in ("/", "%") and b == 0:
+                if ins.op in ("/", "%", "/.") and b == 0:
                     raise RuntimeFault("division by zero")
-                env[ins.dst.name] = fold_binary(ins.op, a, b)  # type: ignore[arg-type]
+                if ins.op.endswith("."):
+                    folded = fold_float(ins.op, a, b)  # type: ignore[arg-type]
+                    env[ins.dst.name] = folded.value  # type: ignore[union-attr]
+                else:
+                    env[ins.dst.name] = fold_binary(ins.op, a, b)  # type: ignore[arg-type]
             elif isinstance(ins, UnOp):
                 v = val(ins.operand)
-                env[ins.dst.name] = wrap(-v) if ins.op == "neg" else int(v == 0)  # type: ignore[operator]
+                if ins.op == "neg":
+                    env[ins.dst.name] = wrap(-v)  # type: ignore[operator]
+                elif ins.op == "not":
+                    env[ins.dst.name] = int(v == 0)
+                elif ins.op == "itof":
+                    env[ins.dst.name] = float(v)  # type: ignore[arg-type]
+                else:
+                    env[ins.dst.name] = -v  # type: ignore[operator]
             elif isinstance(ins, Jump):
                 pc = labels[ins.target]
             elif isinstance(ins, JumpIfFalse):
@@ -116,11 +129,27 @@ class Machine:
                 v = val(ins.value)
                 if ins.ty == "bool":
                     self.out.append((TRUE_WORD if v else FALSE_WORD) + "\n")
+                elif ins.ty == "float":
+                    self.out.append(format_float(v) + "\n")  # type: ignore[arg-type]
                 else:
                     self.out.append(f"{v}\n")
             elif isinstance(ins, ReadInstr):
                 env[ins.dst.name] = self.read_int()
         return None
+
+
+def format_float(v: float) -> str:
+    """Print a decimal with six digits after the point, exactly as the native runtime does."""
+    if v != v or v in (float("inf"), float("-inf")) or abs(v) >= 9.2e18:
+        raise RuntimeFault("a decimal number is too large to print")
+    negative = v < 0
+    x = -v if negative else v
+    whole = int(x)
+    scaled = round((x - float(whole)) * 1000000.0)  # rounds halves to even, like the processor
+    if scaled >= 1000000:
+        whole += 1
+        scaled -= 1000000
+    return f"{'-' if negative else ''}{whole}.{scaled:06d}"
 
 
 def run(program: IRProgram, stdin: str = "") -> str:

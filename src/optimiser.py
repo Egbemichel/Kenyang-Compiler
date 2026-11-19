@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from src.ir import (
-    BinOp, CallInstr, Instr, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
+    BinOp, CallInstr, FloatConst, Instr, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
     JumpIfTrue, Label, Move, Operand, ReadInstr, ReturnInstr, UnOp, Var, WriteInstr,
 )
 
@@ -62,6 +62,20 @@ def fold_binary(op: str, a: int, b: int) -> int | None:
     if op == "!=":
         return int(a != b)
     return None
+
+
+def fold_float(op: str, a: float, b: float) -> Operand | None:
+    """Work out a calculation on two decimal numbers (operators end in a dot)."""
+    if op == "+.":
+        return FloatConst(a + b)
+    if op == "-.":
+        return FloatConst(a - b)
+    if op == "*.":
+        return FloatConst(a * b)
+    if op == "/.":
+        return FloatConst(a / b) if b != 0 else None
+    table = {"<.": a < b, "<=.": a <= b, ">.": a > b, ">=.": a >= b, "==.": a == b, "!=.": a != b}
+    return IntConst(int(table[op])) if op in table else None
 
 
 @dataclass
@@ -111,10 +125,19 @@ def propagate(body: list[Instr]) -> list[Instr]:
         elif isinstance(instr, UnOp):
             operand = value(instr.operand)
             forget(instr.dst.name)
+            folded_op: Operand | None = None
             if isinstance(operand, IntConst):
-                folded = wrap(-operand.value) if instr.op == "neg" else int(operand.value == 0)
-                known[instr.dst.name] = IntConst(folded)
-                out.append(Move(instr.dst, IntConst(folded)))
+                if instr.op == "neg":
+                    folded_op = IntConst(wrap(-operand.value))
+                elif instr.op == "not":
+                    folded_op = IntConst(int(operand.value == 0))
+                elif instr.op == "itof":
+                    folded_op = FloatConst(float(operand.value))
+            elif isinstance(operand, FloatConst) and instr.op == "fneg":
+                folded_op = FloatConst(-operand.value)
+            if folded_op is not None:
+                known[instr.dst.name] = folded_op
+                out.append(Move(instr.dst, folded_op))
             else:
                 out.append(UnOp(instr.dst, instr.op, operand))
         elif isinstance(instr, JumpIfFalse):
@@ -153,6 +176,8 @@ def simplify_binary(op: str, left: Operand, right: Operand) -> Operand | None:
     if isinstance(left, IntConst) and isinstance(right, IntConst):
         folded = fold_binary(op, left.value, right.value)
         return IntConst(folded) if folded is not None else None
+    if isinstance(left, FloatConst) and isinstance(right, FloatConst):
+        return fold_float(op, left.value, right.value)
     if op == "+":
         if right == IntConst(0):
             return left
@@ -224,8 +249,9 @@ def remove_dead_stores(body: list[Instr]) -> list[Instr]:
         if isinstance(instr, (Move, UnOp)) and instr.dst.name not in used:
             continue
         if isinstance(instr, BinOp) and instr.dst.name not in used:
-            divides = instr.op in ("/", "%")
-            if not divides or (isinstance(instr.right, IntConst) and instr.right.value != 0):
+            divides = instr.op in ("/", "%", "/.")
+            safe = isinstance(instr.right, (IntConst, FloatConst)) and instr.right.value != 0
+            if not divides or safe:
                 continue
         if isinstance(instr, CallInstr) and instr.dst is not None and instr.dst.name not in used:
             out.append(replace(instr, dst=None))

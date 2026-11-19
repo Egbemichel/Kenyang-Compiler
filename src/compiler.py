@@ -24,7 +24,7 @@ from src import ast_nodes, codegen, interpreter, ir, optimiser, toolchain
 from src.diagnostics import Diagnostic
 from src.lexer import KenyangLexer, Token
 from src.parser import parse
-from src.semantic import analyse
+from src.semantic import analyse_with_warnings
 
 # Words from the "extended" tier stay available as plain names (for example
 # `a` or `te`), because this version of the compiler does not use them.
@@ -46,7 +46,9 @@ class Compilation:
     ir_optimised: ir.IRProgram | None = None
     stats: optimiser.Stats | None = None
     asm: str | None = None
+    asm_counts: tuple[int, int] | None = None  # instructions before and after the clean-up
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -69,10 +71,11 @@ def compile_source(source: str, filename: str = "<input>", optimise: bool = True
         result.errors = [e.format(filename) for e in parse_errors]
         return result
 
-    semantic_errors = analyse(program, source)
+    semantic_errors, warnings = analyse_with_warnings(program, source)
     if semantic_errors:
         result.errors = [e.format(filename) for e in semantic_errors]
         return result
+    result.warnings = [w.format(filename) for w in warnings]
 
     result.ir = ir.generate(program)
     if optimise:
@@ -80,7 +83,8 @@ def compile_source(source: str, filename: str = "<input>", optimise: bool = True
     else:
         result.ir_optimised = result.ir
     if want_asm:
-        result.asm = codegen.generate(result.ir_optimised)
+        result.asm, before, after = codegen.generate_with_stats(result.ir_optimised, clean_up=optimise)
+        result.asm_counts = (before, after)
     return result
 
 
@@ -103,6 +107,7 @@ def _build_cli() -> argparse.ArgumentParser:
                    help="run on the built-in virtual machine instead of making an executable")
     p.add_argument("--no-opt", action="store_true", help="turn the optimiser off")
     p.add_argument("--stats", action="store_true", help="show what the optimiser removed")
+    p.add_argument("--no-warn", action="store_true", help="hide warnings")
     return p
 
 
@@ -128,6 +133,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n{count} error{'s' if count != 1 else ''} found. Nothing was built.", file=sys.stderr)
         return 1
 
+    if result.warnings and not args.no_warn:
+        for message in result.warnings:
+            print(message, file=sys.stderr)
+        count = len(result.warnings)
+        print(f"{count} warning{'s' if count != 1 else ''}.\n", file=sys.stderr)
+
     assert result.program and result.ir and result.ir_optimised and result.asm
     if args.emit == "ast":
         print(ast_nodes.dump(result.program))
@@ -140,6 +151,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.stats and result.stats:
         s = result.stats
         print(f"optimiser: {s.before} instructions before, {s.after} after, {s.removed} removed",
+              file=sys.stderr)
+    if args.stats and result.asm_counts:
+        b, a = result.asm_counts
+        print(f"assembly clean-up: {b} instructions before, {a} after, {b - a} removed",
               file=sys.stderr)
     if args.emit:
         return 0

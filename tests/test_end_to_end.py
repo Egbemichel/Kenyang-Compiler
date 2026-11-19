@@ -23,6 +23,8 @@ EXPECTED = {
     "many_args": ("", "140\n204\n"),
     "input_sum": ("12 -5\n", "7\n-60\n"),
     "journey": ("", "14\n"),
+    "decimals": ("", "3.250000\n-1.500000\ntɛtɛp\n8.500000\n12.566360\n1.000000\n"
+                     "0.333333\n-7.500000\n7.000000\n"),
 }
 
 
@@ -124,3 +126,40 @@ def test_cli_interpret_runs_the_program(capsys) -> None:
 
 def test_cli_missing_file(capsys) -> None:
     assert compiler.main(["no_such_file.ken"]) == 2
+
+
+@needs_native
+def test_native_decimal_printing_matches_the_virtual_machine(tmp_path) -> None:
+    source = ("kʉ main() : ngwɔ { sɔ(1 / 3.0); sɔ(-2.5); sɔ(0.0000004); sɔ(0.9999996); "
+              "sɔ(123456789.125); sɔ(-0.5); sɔ(2.0 * 3 - 0.75); }")
+    assert run_native(tmp_path, source, optimise=False) == run_vm(source, optimise=False)
+    assert run_native(tmp_path, source) == run_vm(source)
+
+
+@needs_native
+def test_native_decimal_division_by_zero(tmp_path) -> None:
+    from src import toolchain
+    result = build("kʉ main() : ngwɔ { pɨ_kati z = 0.0; sɔ(1 / z); }", optimise=False)
+    asm = tmp_path / "prog.s"
+    asm.write_text(result.asm, encoding="utf-8", newline="\n")
+    toolchain.build(asm, tmp_path / "prog")
+    code, out, err = toolchain.run_executable(tmp_path / "prog")
+    assert code == 1 and "division by zero" in err
+
+
+def test_assembly_clean_up_removes_reloads_and_keeps_the_answer() -> None:
+    source = (EXAMPLES / "loops.ken").read_text(encoding="utf-8")
+    with_pass = compiler.compile_source(source, "t.ken")
+    without = compiler.compile_source(source, "t.ken", optimise=False)
+    before, after = with_pass.asm_counts
+    assert after < before
+    assert without.asm_counts[0] == without.asm_counts[1]  # --no-opt also skips the clean-up
+
+
+def test_cli_prints_warnings_but_still_runs(capsys) -> None:
+    code = compiler.main([str(EXAMPLES / "errors" / "warnings.ken"), "--interpret"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "2 warnings" in captured.err and captured.out == "2\n"
+    compiler.main([str(EXAMPLES / "errors" / "warnings.ken"), "--interpret", "--no-warn"])
+    assert "warning" not in capsys.readouterr().err

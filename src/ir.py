@@ -33,6 +33,14 @@ class IntConst:
 
 
 @dataclass(frozen=True)
+class FloatConst:
+    value: float
+
+    def __str__(self) -> str:
+        return repr(self.value)
+
+
+@dataclass(frozen=True)
 class StrConst:
     index: int  # position in the program's string table
 
@@ -40,7 +48,7 @@ class StrConst:
         return f"str{self.index}"
 
 
-Operand = Union[Var, IntConst, StrConst]
+Operand = Union[Var, IntConst, FloatConst, StrConst]
 
 
 # -------------------------------------------------------------- instructions
@@ -102,11 +110,11 @@ class BinOp:
 @dataclass
 class UnOp:
     dst: Var
-    op: str  # "neg" or "not"
+    op: str  # neg, not, fneg (decimal minus) or itof (whole number to decimal)
     operand: Operand
 
     def __str__(self) -> str:
-        symbol = "-" if self.op == "neg" else "not "
+        symbol = {"neg": "-", "not": "not ", "fneg": "-.", "itof": "itof "}[self.op]
         return f"    {self.dst} = {symbol}{self.operand}"
 
 
@@ -132,7 +140,7 @@ class ReturnInstr:
 @dataclass
 class WriteInstr:
     value: Operand
-    ty: str  # int, bool or string: decides how the value is printed
+    ty: str  # int, float, bool or string: decides how the value is printed
 
     def __str__(self) -> str:
         return f"    write {self.value} : {self.ty}"
@@ -185,6 +193,8 @@ class Generator:
         self.temp_count = 0
         self.label_count = 0
         self.loops: list[tuple[str, str]] = []  # (continue label, break label)
+        self.sigs: dict[str, tuple[list[str], str]] = {}
+        self.ret_type = "void"
 
     def temp(self) -> Var:
         self.temp_count += 1
@@ -202,7 +212,18 @@ class Generator:
             self.strings.append(text)
         return StrConst(self.strings.index(text))
 
+    def coerce(self, op: Operand, have: str | None, want: str | None) -> Operand:
+        """Turn a whole number into a decimal where a decimal is needed."""
+        if want != "float" or have != "int":
+            return op
+        if isinstance(op, IntConst):
+            return FloatConst(float(op.value))
+        dst = self.temp()
+        self.emit(UnOp(dst, "itof", op))
+        return dst
+
     def program(self, program: ast.Program) -> IRProgram:
+        self.sigs = {f.name: ([p.ty or "int" for p in f.params], f.ret_type) for f in program.functions}
         functions = [self.function(f) for f in program.functions]
         return IRProgram(functions, self.strings)
 
@@ -211,6 +232,7 @@ class Generator:
         self.temp_count = 0
         self.label_count = 0
         self.loops = []
+        self.ret_type = func.ret_type
         for stmt in func.body.stmts:
             self.stmt(stmt)
         if func.ret_type == "void":
@@ -222,14 +244,17 @@ class Generator:
     def stmt(self, stmt: ast.Stmt) -> None:
         if isinstance(stmt, ast.VarDecl):
             if stmt.init is not None:
-                value = self.expr(stmt.init)
+                value = self.coerce(self.expr(stmt.init), stmt.init.ty, stmt.ty)
             elif stmt.ty == "string":
                 value = self.string_const("")
+            elif stmt.ty == "float":
+                value = FloatConst(0.0)
             else:
                 value = IntConst(0)
             self.emit(Move(Var(stmt.unique), value))
         elif isinstance(stmt, ast.Assign):
-            self.emit(Move(Var(stmt.unique), self.expr(stmt.value)))
+            value = self.coerce(self.expr(stmt.value), stmt.value.ty, stmt.ty)
+            self.emit(Move(Var(stmt.unique), value))
         elif isinstance(stmt, ast.Block):
             for inner in stmt.stmts:
                 self.stmt(inner)
@@ -247,7 +272,10 @@ class Generator:
         elif isinstance(stmt, ast.For):
             self.for_stmt(stmt)
         elif isinstance(stmt, ast.Return):
-            self.emit(ReturnInstr(self.expr(stmt.value) if stmt.value is not None else None))
+            if stmt.value is None:
+                self.emit(ReturnInstr(None))
+            else:
+                self.emit(ReturnInstr(self.coerce(self.expr(stmt.value), stmt.value.ty, self.ret_type)))
         elif isinstance(stmt, ast.Write):
             self.emit(WriteInstr(self.expr(stmt.value), stmt.value.ty or "int"))
         elif isinstance(stmt, ast.Read):
@@ -255,7 +283,7 @@ class Generator:
         elif isinstance(stmt, ast.ExprStmt):
             call = stmt.expr
             assert isinstance(call, ast.Call)
-            args = [self.expr(a) for a in call.args]
+            args = self.call_args(call)
             dst = self.temp() if call.ty != "void" else None
             self.emit(CallInstr(dst, call.name, args))
         elif isinstance(stmt, ast.Break):
@@ -298,6 +326,8 @@ class Generator:
     def expr(self, expr: ast.Expr) -> Operand:
         if isinstance(expr, ast.IntLit):
             return IntConst(expr.value)
+        if isinstance(expr, ast.FloatLit):
+            return FloatConst(expr.value)
         if isinstance(expr, ast.BoolLit):
             return IntConst(1 if expr.value else 0)
         if isinstance(expr, ast.StrLit):
@@ -307,22 +337,32 @@ class Generator:
         if isinstance(expr, ast.Unary):
             operand = self.expr(expr.operand)
             dst = self.temp()
-            self.emit(UnOp(dst, expr.op, operand))
+            op = "fneg" if expr.op == "neg" and expr.operand.ty == "float" else expr.op
+            self.emit(UnOp(dst, op, operand))
             return dst
         if isinstance(expr, ast.Binary):
             if expr.op in ("and", "or"):
                 return self.short_circuit(expr)
             left = self.expr(expr.left)
             right = self.expr(expr.right)
+            op = expr.op
+            if "float" in (expr.left.ty, expr.right.ty):
+                left = self.coerce(left, expr.left.ty, "float")
+                right = self.coerce(right, expr.right.ty, "float")
+                op += "."
             dst = self.temp()
-            self.emit(BinOp(dst, expr.op, left, right))
+            self.emit(BinOp(dst, op, left, right))
             return dst
         if isinstance(expr, ast.Call):
-            args = [self.expr(a) for a in expr.args]
+            args = self.call_args(expr)
             dst = self.temp()
             self.emit(CallInstr(dst, expr.name, args))
             return dst
         raise AssertionError(f"unknown expression {expr!r}")
+
+    def call_args(self, call: ast.Call) -> list[Operand]:
+        param_types = self.sigs[call.name][0]
+        return [self.coerce(self.expr(a), a.ty, want) for a, want in zip(call.args, param_types)]
 
     def short_circuit(self, expr: ast.Binary) -> Operand:
         """`a and b` skips b when a is false; `a or b` skips b when a is true."""

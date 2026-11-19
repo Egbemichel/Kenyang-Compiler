@@ -53,16 +53,16 @@ def test_condition_must_be_bool() -> None:
 
 
 def test_operator_types() -> None:
-    assert "needs two ints" in one_error("pɨ x = tɛtɛp + 1;")
+    assert "needs two numbers" in one_error("pɨ x = tɛtɛp + 1;")
     assert "needs two bools" in one_error("tɛp b = 1 ne 2;")
     assert "needs a bool" in one_error("tɛp b = ka 3;")
-    assert "needs an int" in one_error("pɨ x = -tɛtɛp;")
+    assert "needs a number" in one_error("pɨ x = -tɛtɛp;")
     assert "same type" in one_error("tɛp b = 1 == tɛtɛp;")
 
 
 def test_string_operations_that_are_not_supported() -> None:
     assert "comparing strings" in one_error('tɛp b = "a" == "b";')
-    assert "needs two ints" in one_error('bɛyɔŋ s = "a" + "b";')
+    assert "needs two numbers" in one_error('bɛyɔŋ s = "a" + "b";')
 
 
 def test_call_checks() -> None:
@@ -117,7 +117,7 @@ def test_duplicate_function() -> None:
 
 
 def test_unsupported_types_and_huge_numbers() -> None:
-    assert "not supported" in one_error("pɨ_kati x;")
+    assert "not supported" in one_error("ɛyɔŋ c;")
     assert "too large" in one_error("pɨ x = 9223372036854775808;")
 
 
@@ -136,3 +136,60 @@ def test_expression_types_are_written_on_the_tree() -> None:
     result = compile_source("kʉ main() : ngwɔ { sɔ(1 < 2); }", "t.ken")
     write = result.program.functions[0].body.stmts[0]
     assert write.value.ty == "bool"
+
+
+# ------------------------------------------------------------- decimal numbers
+
+def test_whole_number_widens_to_decimal_but_not_back() -> None:
+    assert errors_for("pɨ_kati x = 3; x = 4; sɔ(x);") == []
+    assert "cannot store float in 'n', which is int" in one_error("pɨ n = 1.5;")
+    assert "cannot store float" in one_error("pɨ n = 1; n = 2.5;")
+
+
+def test_mixed_arithmetic_gives_a_decimal() -> None:
+    result = compile_source("kʉ main() : ngwɔ { sɔ(1 + 2.5); sɔ(2 * 3); sɔ(1 < 2.5); }", "t.ken")
+    writes = result.program.functions[0].body.stmts
+    assert [w.value.ty for w in writes] == ["float", "int", "bool"]
+
+
+def test_remainder_needs_whole_numbers() -> None:
+    message = one_error("sɔ(5.5 % 2);")
+    assert "'%' needs two ints" in message and "whole numbers" in message
+
+
+def test_decimal_parameters_and_returns_accept_whole_numbers() -> None:
+    helper = "kʉ half(pɨ_kati v) : pɨ_kati { piti v / 2; }"
+    assert errors_for("sɔ(half(3));", helper) == []
+    assert "should be float" not in "".join(errors_for("sɔ(half(3));", helper))
+    assert "argument 1 of 'half' should be float" in one_error('sɔ(half("x"));', helper)
+
+
+# --------------------------------------------------------------------- warnings
+
+def warnings_for(source: str) -> list[str]:
+    return compile_source(source, "t.ken").warnings
+
+
+def test_unused_variable_gets_a_warning() -> None:
+    warnings = warnings_for("kʉ main() : ngwɔ { pɨ spare = 1; }")
+    assert len(warnings) == 1 and "variable 'spare' is never used" in warnings[0]
+
+
+def test_used_variables_parameters_and_underscore_names_give_no_warning() -> None:
+    src = "kʉ f(pɨ unused_param) { pɨ _skip = 1; pɨ x = 2; sɔ(x); } kʉ main() { f(1); }"
+    assert warnings_for(src) == []
+
+
+def test_code_after_return_gets_a_warning() -> None:
+    warnings = warnings_for('kʉ f() : pɨ { piti 1; sɔ("x"); } kʉ main() { sɔ(f()); }')
+    assert len(warnings) == 1 and "can never run" in warnings[0]
+
+
+def test_warnings_do_not_stop_the_build() -> None:
+    result = compile_source("kʉ main() : ngwɔ { pɨ spare = 1; }", "t.ken")
+    assert result.ok and result.asm is not None
+
+
+def test_no_example_program_has_a_warning() -> None:
+    for path in sorted(EXAMPLES.glob("*.ken")):
+        assert compile_source(path.read_text(encoding="utf-8"), path.name).warnings == [], path.name

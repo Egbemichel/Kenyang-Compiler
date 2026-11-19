@@ -16,19 +16,55 @@ Plan used here, kept simple on purpose:
 
 from __future__ import annotations
 
+import struct
+
 from src.ir import (
-    BinOp, CallInstr, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
+    BinOp, CallInstr, FloatConst, IntConst, IRFunction, IRProgram, Jump, JumpIfFalse,
     JumpIfTrue, Label, Move, Operand, ReadInstr, ReturnInstr, StrConst, UnOp,
     Var, WriteInstr,
 )
 
 ARG_REGS = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+FLOAT_ARITH = {"+.": "addsd", "-.": "subsd", "*.": "mulsd", "/.": "divsd"}
+FLOAT_COMPARE = {  # operator: (ucomisd operands in order, condition set)
+    "<.": ("xmm1, xmm0", "seta"), "<=.": ("xmm1, xmm0", "setae"),
+    ">.": ("xmm0, xmm1", "seta"), ">=.": ("xmm0, xmm1", "setae"),
+    "==.": ("xmm0, xmm1", "sete"), "!=.": ("xmm0, xmm1", "setne"),
+}
 COMPARE_SET = {"<": "setl", "<=": "setle", ">": "setg", ">=": "setge", "==": "sete", "!=": "setne"}
 
 
 def sym(name: str) -> str:
     """Assembly name of a Kenyang function (prefixed so it never clashes)."""
     return f"ken_{name}"
+
+
+def count_instructions(lines: list[str]) -> int:
+    """Count real instructions (not labels, directives or comments)."""
+    return sum(1 for l in lines if l.startswith("    ") and l.strip()[:1] not in (".", "#"))
+
+
+def peephole(lines: list[str]) -> list[str]:
+    """Small clean-up of the assembly text.
+
+    The generator stores every answer in a stack box, and the next instruction
+    often loads the same box straight back. The value is still in the register,
+    so the load is not needed (or is a cheaper register copy).
+    """
+    out: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if out:
+            prev = out[-1].strip()
+            if prev.startswith("mov [rbp - ") and prev.endswith(", rax"):
+                slot = prev[len("mov "):prev.index("],") + 1]
+                if text == f"mov rax, {slot}":
+                    continue
+                if text == f"mov rcx, {slot}":
+                    out.append("    mov rcx, rax")
+                    continue
+        out.append(line)
+    return out
 
 
 def byte_list(text: str) -> str:
@@ -87,6 +123,10 @@ class FunctionEmitter:
                 self.emit(f"xor {reg}, {reg}")
             else:
                 self.emit(f"mov {reg}, {op.value}")
+        elif isinstance(op, FloatConst):
+            # a decimal travels as its 64 raw bits, like any other 8-byte value
+            bits = struct.unpack("<q", struct.pack("<d", op.value))[0]
+            self.emit(f"mov {reg}, {bits}")
         elif isinstance(op, StrConst):
             self.emit(f"lea {reg}, [rip + str_{op.index}]")
         else:
@@ -144,6 +184,11 @@ class FunctionEmitter:
             self.load("rax", ins.operand)
             if ins.op == "neg":
                 self.emit("neg rax")
+            elif ins.op == "itof":
+                self.emit("cvtsi2sd xmm0, rax")
+                self.emit("movq rax, xmm0")
+            elif ins.op == "fneg":
+                self.emit("btc rax, 63")  # flip the sign bit
             else:
                 self.emit("xor rax, 1")
             self.store(ins.dst)
@@ -157,7 +202,8 @@ class FunctionEmitter:
             self.emit(f"jmp {self.local_label('end')}")
         elif isinstance(ins, WriteInstr):
             self.load("rdi", ins.value)
-            routine = {"int": "rt_print_int", "bool": "rt_print_bool"}.get(ins.ty, "rt_print_str")
+            routine = {"int": "rt_print_int", "bool": "rt_print_bool",
+                       "float": "rt_print_float"}.get(ins.ty, "rt_print_str")
             self.emit(f"call {routine}")
         elif isinstance(ins, ReadInstr):
             self.emit("call rt_read_int")
@@ -169,7 +215,9 @@ class FunctionEmitter:
         op = ins.op
         self.load("rax", ins.left)
         self.load("rcx", ins.right)
-        if op == "+":
+        if op.endswith("."):
+            self.float_binary(op)
+        elif op == "+":
             self.emit("add rax, rcx")
         elif op == "-":
             self.emit("sub rax, rcx")
@@ -187,6 +235,22 @@ class FunctionEmitter:
             self.emit(f"{COMPARE_SET[op]} al")
             self.emit("movzx rax, al")
         self.store(ins.dst)
+
+    def float_binary(self, op: str) -> None:
+        self.emit("movq xmm0, rax")
+        self.emit("movq xmm1, rcx")
+        if op in FLOAT_ARITH:
+            if op == "/.":
+                self.emit("xorpd xmm2, xmm2")
+                self.emit("ucomisd xmm1, xmm2")
+                self.emit("je rt_div_zero")
+            self.emit(f"{FLOAT_ARITH[op]} xmm0, xmm1")
+            self.emit("movq rax, xmm0")
+        else:
+            operands, condition = FLOAT_COMPARE[op]
+            self.emit(f"ucomisd {operands}")
+            self.emit(f"{condition} al")
+            self.emit("movzx rax, al")
 
     def call(self, ins: CallInstr) -> None:
         reg_args = ins.args[: len(ARG_REGS)]
@@ -219,6 +283,69 @@ _start:
     xor edi, edi
     mov eax, 60                 # exit(0)
     syscall
+
+# print the decimal number whose 64 bits are in rdi (six digits after the point), then a new line
+rt_print_float:
+    push rbp
+    mov rbp, rsp
+    sub rsp, 48
+    xor r8d, r8d                # r8 = 1 when the number is negative
+    movq xmm0, rdi
+    xorpd xmm1, xmm1
+    ucomisd xmm0, xmm1
+    jae 14f
+    mov r8d, 1
+    btc rdi, 63                 # work with the positive value
+    movq xmm0, rdi
+14:
+    cvttsd2si r9, xmm0          # r9 = whole part
+    cvtsi2sd xmm1, r9
+    subsd xmm0, xmm1
+    mov rax, 1000000
+    cvtsi2sd xmm1, rax
+    mulsd xmm0, xmm1
+    cvtsd2si r10, xmm0          # r10 = six digits after the point
+    cmp r10, 1000000
+    jb 15f
+    inc r9
+    sub r10, 1000000
+15:
+    lea rsi, [rbp - 1]
+    mov byte ptr [rsi], 10
+    mov rax, r10
+    mov ecx, 10
+    mov r11d, 6
+16:
+    xor edx, edx
+    div rcx
+    add dl, 48
+    dec rsi
+    mov [rsi], dl
+    dec r11d
+    jnz 16b
+    dec rsi
+    mov byte ptr [rsi], 46      # the point
+    mov rax, r9
+17:
+    xor edx, edx
+    div rcx
+    add dl, 48
+    dec rsi
+    mov [rsi], dl
+    test rax, rax
+    jnz 17b
+    test r8d, r8d
+    jz 18f
+    dec rsi
+    mov byte ptr [rsi], 45      # the minus sign
+18:
+    mov rdx, rbp
+    sub rdx, rsi
+    mov edi, 1
+    mov eax, 1
+    syscall
+    leave
+    ret
 
 # print the signed number in rdi, then a new line
 rt_print_int:
@@ -376,7 +503,13 @@ rt_div_msg:
 """
 
 
-def generate(program: IRProgram) -> str:
+def generate(program: IRProgram, clean_up: bool = True) -> str:
+    return generate_with_stats(program, clean_up)[0]
+
+
+def generate_with_stats(program: IRProgram, clean_up: bool = True) -> tuple[str, int, int]:
+    """Return (assembly text, instructions before clean-up, instructions after)."""
+    before = after = 0
     lines = [
         "# Generated by the Lower Kenyang compiler. Target: x86-64 Linux.",
         "    .intel_syntax noprefix",
@@ -384,7 +517,12 @@ def generate(program: IRProgram) -> str:
         "",
     ]
     for func in program.functions:
-        lines.extend(FunctionEmitter(func, program.strings).generate())
+        body = FunctionEmitter(func, program.strings).generate()
+        before += count_instructions(body)
+        if clean_up:
+            body = peephole(body)
+        after += count_instructions(body)
+        lines.extend(body)
         lines.append("")
     lines.append(RUNTIME.strip("\n"))
     lines.append("")
@@ -394,4 +532,4 @@ def generate(program: IRProgram) -> str:
         lines.append(f"    .byte {byte_list(text)}")
     lines.append("")
     lines.append('    .section .note.GNU-stack,"",@progbits')
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines) + "\n", before, after

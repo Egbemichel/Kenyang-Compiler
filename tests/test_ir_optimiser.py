@@ -139,3 +139,31 @@ def test_instruction_count_ignores_labels() -> None:
 def test_vm_skips_a_byte_order_mark_before_the_number() -> None:
     src = "kʉ main() : ngwɔ { pɨ a; pay(a); sɔ(a); }"
     assert run_vm(src, "\ufeff12\n") == "12\n"
+
+
+# -------------------------------------------------------------- decimal numbers
+
+def test_whole_number_is_converted_when_mixed_with_a_decimal() -> None:
+    lines = main_body("pɨ n; pay(n); pɨ_kati x = n * 1.5; sɔ(x);")
+    assert "t1 = itof n" in lines
+    assert any("*." in line for line in lines)
+
+
+def test_decimal_constants_are_folded() -> None:
+    lines = main_body("sɔ(1.5 * 2 + 0.25);", optimise=True)
+    assert lines == ["write 3.25 : float", "return"]
+
+
+def test_decimal_division_by_zero_is_not_folded() -> None:
+    lines = main_body("pɨ_kati z = 0.0; sɔ(1.0 / z);", optimise=True)
+    assert any("/." in line for line in lines)
+
+
+def test_vm_prints_decimals_with_six_digits() -> None:
+    src = "kʉ main() : ngwɔ { sɔ(1 / 3.0); sɔ(-2.5); sɔ(0.0000004); sɔ(0.9999996); sɔ(100); }"
+    assert run_vm(src) == "0.333333\n-2.500000\n0.000000\n1.000000\n100\n"
+
+
+def test_vm_decimal_division_by_zero() -> None:
+    with pytest.raises(RuntimeFault, match="division by zero"):
+        run_vm("kʉ main() : ngwɔ { pɨ_kati z = 0.0; sɔ(1 / z); }")
