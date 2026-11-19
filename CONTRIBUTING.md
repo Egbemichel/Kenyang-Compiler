@@ -20,8 +20,8 @@ This repository uses a simple, clean **feature-branch workflow** so all 4 group 
 
 1. **Clone the repository and enter the folder:**
    ```powershell
-   git clone <REPO_URL>
-   cd "Compiler construction"
+   git clone https://github.com/Sirchella/Kenyang-Compiler.git
+   cd Kenyang-Compiler
    ```
 2. **Install Python dependencies and verify tests pass:**
    ```powershell
