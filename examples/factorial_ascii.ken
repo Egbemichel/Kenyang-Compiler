@@ -1,0 +1,16 @@
+// Factorial program in Lower Kenyang (ASCII fallback orthography)
+kuh factorial(pih n) : pih {
+    yat (n <= 1) {
+        piti 1;
+    } roh {
+        piti n * factorial(n - 1);
+    }
+}
+
+kuh main() : ngwoh {
+    /* Read input and print factorial */
+    pih num = 5;
+    pih ans = factorial(num);
+    soh(ans);
+    piti;
+}

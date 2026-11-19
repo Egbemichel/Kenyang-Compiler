@@ -1,0 +1,16 @@
+// Factorial program in Lower Kenyang (UTF-8 orthography)
+kʉ factorial(pɨ n) : pɨ {
+    yat (n <= 1) {
+        piti 1;
+    } rɔ {
+        piti n * factorial(n - 1);
+    }
+}
+
+kʉ main() : ngwɔ {
+    /* Read input and print factorial */
+    pɨ num = 5;
+    pɨ ans = factorial(num);
+    sɔ(ans);
+    piti;
+}

@@ -1,0 +1,16 @@
+// Fibonacci sequence in Lower Kenyang (UTF-8)
+kʉ fibonacci(pɨ n) : pɨ {
+    yat (n <= 1) {
+        piti n;
+    }
+    piti fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+kʉ main() : ngwɔ {
+    pɨ i = 0;
+    kʉ_te (i < 10) {
+        sɔ(fibonacci(i));
+        i = i + 1;
+    }
+    piti;
+}

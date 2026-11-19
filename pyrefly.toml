@@ -1,0 +1,4 @@
+project-includes = ["src", "tests"]
+search-path = ["."]
+python-interpreter-path = "C:/Python314/python.exe"
+python-version = "3.14"

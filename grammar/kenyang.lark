@@ -1,0 +1,73 @@
+// Lower Kenyang Programming Language - Lexical Grammar (Lark)
+// Supports both UTF-8 Lower Kenyang orthography (precomposed or combining tone marks)
+// and standardized ASCII fallback.
+
+start: _token*
+
+_token: FLOAT_LIT
+      | INT_LIT
+      | STRING_LIT
+      | EQ
+      | NEQ
+      | LE
+      | GE
+      | ASSIGN
+      | LT
+      | GT
+      | PLUS
+      | MINUS
+      | STAR
+      | SLASH
+      | PERCENT
+      | LPAREN
+      | RPAREN
+      | LBRACE
+      | RBRACE
+      | COMMA
+      | SEMI
+      | COLON
+      | WORD
+
+// --- Literals ---
+FLOAT_LIT.2: /[0-9]+\.[0-9]+/
+INT_LIT.1:   /[0-9]+/
+STRING_LIT:  /"([^"\\\r\n]|\\.)*"/
+
+// --- Multi-character operators (higher priority than single-char) ---
+EQ.2:  "=="
+NEQ.2: "!="
+LE.2:  "<="
+GE.2:  ">="
+
+// --- Single-character operators ---
+ASSIGN:  "="
+LT:      "<"
+GT:      ">"
+PLUS:    "+"
+MINUS:   "-"
+STAR:    "*"
+SLASH:   "/"
+PERCENT: "%"
+
+// --- Delimiters ---
+LPAREN: "("
+RPAREN: ")"
+LBRACE: "{"
+RBRACE: "}"
+COMMA:  ","
+SEMI:   ";"
+COLON:  ":"
+
+// --- Words (Keywords & Identifiers) ---
+// Captures ASCII letters, digits, underscores, Latin accented letters (for precomposed tones),
+// Lower Kenyang letters (ɛ, ɔ, ɨ, ʉ, ŋ), and Unicode combining diacritics (U+0300-U+036F).
+WORD: /[a-zA-Z_\u00C0-\u024F\u025B\u0254\u0268\u0289][a-zA-Z0-9_\u00C0-\u024F\u025B\u0254\u0268\u0289\u0300-\u036F]*/
+
+// --- Comments & Whitespace ---
+LINE_COMMENT:  /\/\/[^\r\n]*/
+BLOCK_COMMENT: /\/\*[\s\S]*?\*\//
+WS:            /[ \t\r\n]+/
+
+%ignore WS
+%ignore LINE_COMMENT
+%ignore BLOCK_COMMENT

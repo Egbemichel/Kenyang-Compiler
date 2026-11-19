@@ -1,0 +1,24 @@
+// Prime number check in Lower Kenyang (UTF-8)
+kʉ is_prime(pɨ n) : tɛp {
+    yat (n <= 1) {
+        piti nse;
+    }
+    pɨ d = 2;
+    kʉ_te (d * d <= n) {
+        yat (n % d == 0) {
+            piti nse;
+        }
+        d = d + 1;
+    }
+    piti tɛtɛp;
+}
+
+kʉ main() : ngwɔ {
+    pɨ candidate = 17;
+    yat (is_prime(candidate)) {
+        sɔ("prime");
+    } rɔ {
+        sɔ("not prime");
+    }
+    piti;
+}

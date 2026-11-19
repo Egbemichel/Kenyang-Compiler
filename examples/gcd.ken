@@ -1,0 +1,16 @@
+// Greatest Common Divisor (Euclidean algorithm) in Lower Kenyang (UTF-8)
+kʉ gcd(pɨ a, pɨ b) : pɨ {
+    kʉ_te (b != 0) {
+        pɨ temp = b;
+        b = a % b;
+        a = temp;
+    }
+    piti a;
+}
+
+kʉ main() : ngwɔ {
+    pɨ x = 48;
+    pɨ y = 18;
+    sɔ(gcd(x, y));
+    piti;
+}
